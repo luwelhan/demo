@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Pixel Todo</title>
+    <!-- 引入像素風格 CSS 框架 -->
+    <link href="https://unpkg.com/nes.css@2.3.0/css/nes.min.css" rel="stylesheet" />
+    <!-- 引入英文字體以強化復古感，中文字體會自動 fallback 到系統預設的無襯線體 -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <!-- 引入 Tailwind CSS 輔助排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        /* 中文像素字體：俐方體11號 (Cubic 11)
+           開源 SIL OFL 授權，免費可商用的 11x11 繁體中文點陣字型
+           英文由 Press Start 2P 負責，中文自動 fallback 到俐方體 */
+        @font-face {
+            font-family: 'Cubic 11';
+            src: url('https://cdn.jsdelivr.net/gh/ACh-K/Cubic-11@main/fonts/web/Cubic_11.woff2') format('woff2'),
+                 url('https://raw.githubusercontent.com/ACh-K/Cubic-11/main/fonts/web/Cubic_11.woff2') format('woff2');
+            font-display: swap;
+        }
+
+        body {
+            font-family: 'Press Start 2P', 'Cubic 11', '微軟正黑體', 'Microsoft JhengHei', sans-serif;
+            background-color: #2F3E61;
+            color: #212529;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            /* 關閉字體平滑 (反鋸齒)，讓點陣字的每個像素格清楚方正 */
+            -webkit-font-smoothing: none;
+            text-rendering: optimizeSpeed;
+        }
+
+        /* 中文點陣字專用：俐方體原生尺寸為 11px，
+           用整數倍 (22px = 2倍) 顯示才會像素銳利、不模糊 */
+        .zh-pixel-lg {
+            font-size: 22px;
+            line-height: 1.5;
+            font-weight: normal; /* 禁用假粗體，避免把像素糊掉 */
+        }
+        .nes-field label {
+            font-size: 22px;
+            line-height: 1.3;
+        }
+        .nes-input {
+            font-size: 22px;
+        }
+        .nes-field .nes-select select {
+            font-size: 22px;
+        }
+
+        /* 客製化 NES 容器顏色 */
+        .nes-container.is-blue { background-color: #4285F4; color: white; }
+        .nes-container.is-blue .title { background-color: white; color: #4285F4; }
+        .nes-container.is-grey { background-color: #D3D8E1; }
+        .nes-container.is-orange { background-color: #F9A825; color: white; }
+
+        .hidden-view { display: none !important; }
+
+        .task-list-container {
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .nes-progress { height: 30px; }
+
+        .nes-select select {
+            font-family: 'Press Start 2P', 'Cubic 11', '微軟正黑體', 'Microsoft JhengHei', sans-serif;
+            font-size: 12px;
+        }
+
+        /* 輸入框與按鈕也套用像素字體堆疊，確保中文一致 */
+        .nes-input, .nes-btn, button, input, select {
+            font-family: 'Press Start 2P', 'Cubic 11', '微軟正黑體', 'Microsoft JhengHei', sans-serif;
+        }
+
+        .task-card {
+            background-color: white;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 4px solid #212529;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .task-card.status-已完成 { opacity: 0.6; background-color: #e0e0e0; }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            font-size: 10px;
+            color: white;
+            border: 2px solid #212529;
+        }
+        .badge-工作 { background-color: #d32f2f; }
+        .badge-生活 { background-color: #388e3c; }
+        .badge-學習 { background-color: #1976d2; }
+
+        /* ==========================================
+           像素角色與動畫
+           ========================================== */
+
+        /* 讓兩個主要頁面墊在星星之上 */
+        #login-view, #main-view { position: relative; z-index: 1; }
+
+        /* 兩頁的內容都垂直置中於螢幕正中間 (扣除 body 上下各 20px 的 padding) */
+        #login-view, #main-view {
+            min-height: calc(100vh - 40px);
+        }
+        #main-view {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            justify-content: safe center; /* 小螢幕內容過高時避免頂部被裁切 */
+        }
+        #login-view {
+            justify-content: safe center;
+        }
+
+        /* 夜空像素星星 (背景裝飾) */
+        #star-field {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .pixel-star {
+            position: absolute;
+            animation: twinkle 2.4s infinite;
+        }
+
+        /* 史萊姆：Q 彈跳躍 */
+        .pixel-bounce {
+            display: inline-block;
+            transform-origin: bottom center;
+            animation: bounce-squash 1.6s infinite;
+        }
+
+        /* 幽靈：上下漂浮 */
+        .pixel-float {
+            display: inline-block;
+            animation: floaty 2.2s ease-in-out infinite;
+        }
+
+        /* 小夥伴：左右搖擺 */
+        .pixel-wiggle {
+            display: inline-block;
+            transform-origin: bottom center;
+            animation: wiggle 1.8s ease-in-out infinite;
+        }
+
+        /* 趴在 Inventory 視窗上偷看的貓咪 */
+        .peek-cat {
+            position: absolute;
+            top: -36px;
+            right: 24px;
+            z-index: 2;
+            transition: transform 0.25s steps(3);
+        }
+        #inventory-panel:hover .peek-cat { transform: translateY(-6px); }
+
+        /* 空清單的 Zzz */
+        .zzz {
+            display: inline-block;
+            font-size: 10px;
+            color: #9aa3b2;
+            animation: zzz-float 2.4s infinite;
+        }
+        .zzz:nth-child(2) { animation-delay: 0.5s; }
+        .zzz:nth-child(3) { animation-delay: 1.0s; }
+
+        /* 恭喜視窗的像素彩帶 */
+        #congrats-msg { position: relative; overflow: hidden; }
+        .confetti {
+            position: absolute;
+            top: 0;
+            width: 8px;
+            height: 8px;
+            border: 2px solid #212529;
+            animation: confetti-fall 1.8s linear infinite;
+        }
+
+        @keyframes bounce-squash {
+            0%, 100% { transform: translateY(0) scale(1, 1); }
+            30%      { transform: translateY(0) scale(1.08, 0.92); }
+            55%      { transform: translateY(-14px) scale(0.95, 1.06); }
+            78%      { transform: translateY(0) scale(1.04, 0.96); }
+        }
+        @keyframes floaty {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-7px); }
+        }
+        @keyframes wiggle {
+            0%, 100% { transform: rotate(-4deg); }
+            50%      { transform: rotate(4deg); }
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.9; }
+            50%      { opacity: 0.15; }
+        }
+        @keyframes zzz-float {
+            0%   { opacity: 0; transform: translate(0, 0); }
+            30%  { opacity: 1; }
+            100% { opacity: 0; transform: translate(8px, -14px); }
+        }
+        @keyframes confetti-fall {
+            0%   { transform: translateY(-12px) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(110px) rotate(200deg); opacity: 0; }
+        }
+
+        /* 尊重使用者的減少動態偏好 */
+        @media (prefers-reduced-motion: reduce) {
+            * { animation: none !important; transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 背景像素星空 (由 JS 生成) -->
+    <div id="star-field"></div>
+
+    <!-- 第一頁：登入頁面 -->
+    <div id="login-view" class="container mx-auto flex flex-col justify-center items-center">
+        <div class="nes-container is-rounded is-dark with-title text-center max-w-md w-full">
+            <p class="title">Retro Todo</p>
+
+            <!-- 吉祥物三人組：幽靈 + 史萊姆 + 貓咪 -->
+            <div class="flex justify-center items-end gap-5 mb-5">
+                <span id="login-ghost" class="pixel-float"></span>
+                <span id="login-slime" class="pixel-bounce"></span>
+                <span id="login-cat" class="pixel-wiggle"></span>
+            </div>
+
+            <p class="mb-6 zh-pixel-lg">歡迎來到像素待辦事項！<br>點擊下方按鈕以訪客身分開始你的任務。</p>
+            <button id="login-btn" type="button" class="nes-btn is-primary is-large">Start Game</button>
+        </div>
+    </div>
+
+    <!-- 第二頁：主控台 (預設隱藏，按下 Start Game 後顯示) -->
+    <div id="main-view" class="container mx-auto max-w-6xl hidden-view">
+
+        <div class="flex flex-col md:flex-row gap-6">
+
+            <!-- 左側：新增任務面版 (藍色視窗) -->
+            <div class="nes-container is-rounded is-blue with-title md:w-1/2">
+                <p class="title">New Task</p>
+                <div class="bg-white text-black p-4 border-4 border-black rounded">
+                    <div class="nes-field mb-4">
+                        <label for="task-title">任務名稱</label>
+                        <input type="text" id="task-title" class="nes-input" placeholder="輸入待辦事項...">
+                    </div>
+
+                    <div class="nes-field mb-4">
+                        <label for="task-category">分類</label>
+                        <div class="nes-select">
+                            <select required id="task-category">
+                                <option value="" disabled selected>選擇分類...</option>
+                                <option value="工作">工作 (Work)</option>
+                                <option value="生活">生活 (Life)</option>
+                                <option value="學習">學習 (Study)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="nes-field mb-6">
+                        <label for="task-status">初始狀態</label>
+                        <div class="nes-select">
+                            <select required id="task-status">
+                                <option value="未完成" selected>未完成</option>
+                                <option value="進行中">進行中</option>
+                                <option value="已完成">已完成</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between mt-4">
+                        <button id="logout-btn" type="button" class="nes-btn">Exit</button>
+                        <button id="add-task-btn" type="button" class="nes-btn is-warning">Add Task</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：庫存區/任務列表 (灰色視窗)，貓咪趴在視窗上偷看 -->
+            <div id="inventory-panel" class="nes-container is-rounded is-grey with-title md:w-1/2 flex flex-col" style="position: relative;">
+                <span id="peek-cat" class="peek-cat" title="喵？"></span>
+                <p class="title">Inventory</p>
+
+                <div class="bg-white p-3 border-4 border-black mb-4 rounded">
+                    <p class="text-xs mb-2">Overall Progress (<span id="progress-text">0</span>%)</p>
+                    <progress id="progress-bar" class="nes-progress is-success" value="0" max="100"></progress>
+                </div>
+
+                <div id="task-list" class="task-list-container bg-white p-3 border-4 border-black flex-grow rounded">
+                    <!-- 任務卡片會由 JS 動態生成插入於此 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 下方：恭喜訊息 (橘色視窗)，戴皇冠的史萊姆 + 彩帶 -->
+        <div id="congrats-msg" class="nes-container is-rounded is-orange with-title mt-6 text-center transition-opacity duration-500 opacity-0 hidden">
+            <p class="title">Congratulation</p>
+            <!-- 像素彩帶 -->
+            <span class="confetti" style="left: 8%;  background:#ff5c5c; animation-delay: 0s;"></span>
+            <span class="confetti" style="left: 20%; background:#5cb85c; animation-delay: 0.4s;"></span>
+            <span class="confetti" style="left: 33%; background:#5bc0de; animation-delay: 0.9s;"></span>
+            <span class="confetti" style="left: 47%; background:#ffd23e; animation-delay: 0.2s;"></span>
+            <span class="confetti" style="left: 61%; background:#b58cff; animation-delay: 0.7s;"></span>
+            <span class="confetti" style="left: 74%; background:#ff9db0; animation-delay: 1.2s;"></span>
+            <span class="confetti" style="left: 88%; background:#5bc0de; animation-delay: 0.5s;"></span>
+
+            <div class="flex justify-center py-2">
+                <span id="congrats-slime" class="pixel-bounce"></span>
+            </div>
+            <p class="pb-4">You have earned a Gold Medal !<br><span class="zh-pixel-lg text-white">所有任務已完成 100%</span></p>
+        </div>
+
+    </div>
+
+    <script>
+        // ==========================================
+        // 像素角色繪製系統
+        // 用「字串地圖」定義角色，每個字元對應一種顏色，
+        // 由 JS 轉成 SVG 方格。想改造角色只要改字串即可！
+        // ('.' = 透明)
+        // ==========================================
+
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+
+        // --- 角色地圖 ---
+
+        // 史萊姆 (綠色 Q 彈小夥伴)
+        const SLIME_MAP = [
+            "....OOOO....",
+            "..OOggggOO..",
+            ".OghggggggO.",
+            "OghggggggggO",
+            "OggBggggBggO",
+            "OgPBggggBPgO",
+            "OggggBBggggO",
+            ".OggggggggO.",
+            "..OOOOOOOO.."
+        ];
+
+        // 戴皇冠的史萊姆 (100% 達成時登場)
+        const KING_SLIME_MAP = [
+            "..Y..YY..Y..",
+            "..YYYYYYYY..",
+            ...SLIME_MAP
+        ];
+
+        // 橘貓 (趴在視窗邊偷看)
+        const CAT_MAP = [
+            "OO........OO",
+            "OcO......OcO",
+            "OccccccccccO",
+            "OcdccccccdcO",
+            "OcBccccccBcO",
+            "OccccNNccccO",
+            "OccccccccccO",
+            "..Occ..ccO.."
+        ];
+
+        // 小幽靈 (清單空空的時候出來睡覺)
+        const GHOST_MAP = [
+            "...OOOO...",
+            "..OwwwwO..",
+            ".OwwwwwwO.",
+            "OwwBwwBwwO",
+            "OwPwwwwPwO",
+            "OwwwOOwwwO",
+            "OwwwwwwwwO",
+            "OwwwwwwwwO",
+            ".OO.OO.OO."
+        ];
+
+        // 小星星 (背景裝飾)
+        const STAR_MAP = [
+            ".Y.",
+            "YYY",
+            ".Y."
+        ];
+
+        // --- 調色盤 ---
+        const PALETTES = {
+            slime: { O:'#212529', g:'#77c94f', h:'#c0ee92', B:'#212529', P:'#ff9db0', Y:'#ffd23e' },
+            cat:   { O:'#212529', c:'#f5a742', d:'#d9822b', B:'#212529', N:'#e2557b' },
+            ghost: { O:'#212529', w:'#f4f6ff', B:'#212529', P:'#ffb3c1' },
+            star:  { Y:'#ffe08a' }
+        };
+
+        // 將字串地圖轉成 SVG 像素圖
+        function makePixelSVG(map, palette, pixelSize) {
+            const rows = map.length;
+            const cols = map[0].length;
+            const svg = document.createElementNS(SVG_NS, 'svg');
+            svg.setAttribute('viewBox', `0 0 ${cols} ${rows}`);
+            svg.setAttribute('width', cols * pixelSize);
+            svg.setAttribute('height', rows * pixelSize);
+            svg.setAttribute('shape-rendering', 'crispEdges');
+            svg.setAttribute('aria-hidden', 'true');
+
+            map.forEach((row, y) => {
+                [...row].forEach((ch, x) => {
+                    const color = palette[ch];
+                    if (!color) return; // '.' 或未定義 = 透明
+                    const rect = document.createElementNS(SVG_NS, 'rect');
+                    rect.setAttribute('x', x);
+                    rect.setAttribute('y', y);
+                    rect.setAttribute('width', 1);
+                    rect.setAttribute('height', 1);
+                    rect.setAttribute('fill', color);
+                    svg.appendChild(rect);
+                });
+            });
+            return svg;
+        }
+
+        // --- 把角色放到畫面上 ---
+
+        // 登入頁吉祥物三人組
+        document.getElementById('login-slime').appendChild(makePixelSVG(SLIME_MAP, PALETTES.slime, 8));
+        document.getElementById('login-ghost').appendChild(makePixelSVG(GHOST_MAP, PALETTES.ghost, 5));
+        document.getElementById('login-cat').appendChild(makePixelSVG(CAT_MAP, PALETTES.cat, 5));
+
+        // Inventory 視窗上偷看的貓
+        document.getElementById('peek-cat').appendChild(makePixelSVG(CAT_MAP, PALETTES.cat, 5));
+
+        // 恭喜視窗的皇冠史萊姆
+        document.getElementById('congrats-slime').appendChild(makePixelSVG(KING_SLIME_MAP, PALETTES.slime, 7));
+
+        // 背景像素星空
+        (function buildStars() {
+            const field = document.getElementById('star-field');
+            const spots = [
+                { top: '8%',  left: '6%'  }, { top: '15%', left: '88%' },
+                { top: '30%', left: '18%' }, { top: '45%', left: '94%' },
+                { top: '65%', left: '4%'  }, { top: '80%', left: '80%' },
+                { top: '90%', left: '30%' }, { top: '55%', left: '55%' }
+            ];
+            spots.forEach((pos, i) => {
+                const holder = document.createElement('span');
+                holder.className = 'pixel-star';
+                holder.style.top = pos.top;
+                holder.style.left = pos.left;
+                holder.style.animationDelay = (i * 0.35) + 's';
+                holder.appendChild(makePixelSVG(STAR_MAP, PALETTES.star, 4));
+                field.appendChild(holder);
+            });
+        })();
+
+        // ==========================================
+        // 以下為原本的待辦事項邏輯 (純前端記憶體資料)
+        // ==========================================
+
+        // ---------- 1. DOM 元素綁定 ----------
+        const viewLogin = document.getElementById('login-view');
+        const viewMain = document.getElementById('main-view');
+        const btnLogin = document.getElementById('login-btn');
+        const btnLogout = document.getElementById('logout-btn');
+        const btnAddTask = document.getElementById('add-task-btn');
+
+        const inputTitle = document.getElementById('task-title');
+        const selectCategory = document.getElementById('task-category');
+        const selectStatus = document.getElementById('task-status');
+        const taskListContainer = document.getElementById('task-list');
+
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const congratsMsg = document.getElementById('congrats-msg');
+
+        // ---------- 2. 資料狀態 (記憶體) ----------
+        // 預設放入幾筆示範任務，讓 Inventory 一開始就熱鬧一點
+        let currentTasks = [
+            { id: 1, title: '回覆重要信件',      category: '工作', status: '進行中', createdAt: Date.now() - 500 },
+            { id: 2, title: '整理報告圖表',      category: '工作', status: '未完成', createdAt: Date.now() - 400 },
+            { id: 3, title: '揪朋友玩桌遊',      category: '生活', status: '未完成', createdAt: Date.now() - 300 },
+            { id: 4, title: '幫植物澆水',        category: '生活', status: '已完成', createdAt: Date.now() - 200 },
+            { id: 5, title: '背 20 個英文單字',  category: '學習', status: '未完成', createdAt: Date.now() - 100 }
+        ];
+        let nextId = 6;
+        currentTasks.sort((a, b) => b.createdAt - a.createdAt); // 與新增任務時相同的排序：新 → 舊
+
+        // ---------- 3. 頁面切換 (第一頁 ↔ 第二頁) ----------
+        function showLoginView() {
+            viewLogin.classList.remove('hidden-view');
+            viewMain.classList.add('hidden-view');
+        }
+
+        function showMainView() {
+            viewLogin.classList.add('hidden-view');
+            viewMain.classList.remove('hidden-view');
+            renderTasks();
+            updateProgress();
+        }
+
+        btnLogin.addEventListener('click', showMainView);
+        btnLogout.addEventListener('click', showLoginView);
+
+        // ---------- 4. 任務 CRUD ----------
+
+        btnAddTask.addEventListener('click', () => {
+            const title = inputTitle.value.trim();
+            const category = selectCategory.value;
+            const status = selectStatus.value;
+
+            if (!title) {
+                inputTitle.classList.add('is-error');
+                setTimeout(() => inputTitle.classList.remove('is-error'), 1000);
+                return;
+            }
+            if (!category) {
+                selectCategory.parentElement.classList.add('is-error');
+                setTimeout(() => selectCategory.parentElement.classList.remove('is-error'), 1000);
+                return;
+            }
+
+            currentTasks.push({
+                id: nextId++,
+                title: title,
+                category: category,
+                status: status,
+                createdAt: Date.now()
+            });
+
+            currentTasks.sort((a, b) => b.createdAt - a.createdAt);
+
+            inputTitle.value = '';
+            selectCategory.value = '';
+            selectStatus.value = '未完成';
+
+            renderTasks();
+            updateProgress();
+        });
+
+        // Enter 鍵也可以直接新增
+        inputTitle.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') btnAddTask.click();
+        });
+
+        window.changeTaskStatus = (taskId, newStatus) => {
+            const task = currentTasks.find(t => t.id === taskId);
+            if (task) {
+                task.status = newStatus;
+                renderTasks();
+                updateProgress();
+            }
+        };
+
+        window.deleteTask = (taskId) => {
+            currentTasks = currentTasks.filter(t => t.id !== taskId);
+            renderTasks();
+            updateProgress();
+        };
+
+        // ---------- 5. UI 渲染與進度計算 ----------
+
+        function renderTasks() {
+            taskListContainer.innerHTML = '';
+
+            // 清單為空 → 顯示打瞌睡的小幽靈
+            if (currentTasks.length === 0) {
+                const emptyBox = document.createElement('div');
+                emptyBox.className = 'text-center mt-4';
+
+                const zzz = document.createElement('div');
+                zzz.className = 'h-4';
+                zzz.innerHTML = '<span class="zzz">Z</span><span class="zzz">z</span><span class="zzz">z</span>';
+
+                const ghostHolder = document.createElement('span');
+                ghostHolder.className = 'pixel-float';
+                ghostHolder.appendChild(makePixelSVG(GHOST_MAP, PALETTES.ghost, 6));
+
+                const text = document.createElement('p');
+                text.className = 'text-gray-500 text-xs mt-3';
+                text.innerHTML = 'No tasks found.<br>Create one!';
+
+                emptyBox.appendChild(zzz);
+                emptyBox.appendChild(ghostHolder);
+                emptyBox.appendChild(text);
+                taskListContainer.appendChild(emptyBox);
+                return;
+            }
+
+            currentTasks.forEach(task => {
+                const badgeClass = `badge-${task.category}`;
+
+                const card = document.createElement('div');
+                card.className =
+                    `task-card flex flex-col md:flex-row md:items-center justify-between gap-2 status-${task.status}`;
+
+                card.innerHTML = `
+                    <div class="flex-grow">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="badge ${badgeClass}">${task.category}</span>
+                            <span class="text-xs text-gray-500">${task.status}</span>
+                        </div>
+                        <p class="zh-pixel-lg break-all">${escapeHTML(task.title)}</p>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2 md:mt-0">
+                        <div class="nes-select is-small w-28">
+                            <select onchange="window.changeTaskStatus(${task.id}, this.value)" class="text-xs p-1 h-8">
+                                <option value="未完成" ${task.status === '未完成' ? 'selected' : ''}>未完成</option>
+                                <option value="進行中" ${task.status === '進行中' ? 'selected' : ''}>進行中</option>
+                                <option value="已完成" ${task.status === '已完成' ? 'selected' : ''}>已完成</option>
+                            </select>
+                        </div>
+                        <button type="button" class="nes-btn is-error is-small px-2 py-1 text-xs"
+                                onclick="window.deleteTask(${task.id})">X</button>
+                    </div>
+                `;
+                taskListContainer.appendChild(card);
+            });
+        }
+
+        function updateProgress() {
+            if (currentTasks.length === 0) {
+                progressBar.value = 0;
+                progressText.innerText = 0;
+                progressBar.className = "nes-progress is-success";
+                hideCongrats();
+                return;
+            }
+
+            const completedCount = currentTasks.filter(t => t.status === '已完成').length;
+            const percentage = Math.round((completedCount / currentTasks.length) * 100);
+
+            progressBar.value = percentage;
+            progressText.innerText = percentage;
+
+            if (percentage < 50) {
+                progressBar.className = "nes-progress is-error";
+            } else if (percentage < 100) {
+                progressBar.className = "nes-progress is-warning";
+            } else {
+                progressBar.className = "nes-progress is-success";
+            }
+
+            if (percentage === 100) {
+                showCongrats();
+            } else {
+                hideCongrats();
+            }
+        }
+
+        function showCongrats() {
+            congratsMsg.classList.remove('hidden');
+            setTimeout(() => {
+                congratsMsg.classList.remove('opacity-0');
+                congratsMsg.classList.add('opacity-100');
+            }, 50);
+        }
+
+        function hideCongrats() {
+            congratsMsg.classList.remove('opacity-100');
+            congratsMsg.classList.add('opacity-0');
+            setTimeout(() => {
+                congratsMsg.classList.add('hidden');
+            }, 500);
+        }
+
+        // 簡單的 XSS 防護
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g,
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag])
+            );
+        }
+    </script>
+</body>
+</html>
